@@ -1,0 +1,183 @@
+#!/usr/bin/env starperl
+
+=head1 NAME
+
+ukirtwrapdr - reduce raw UKIRT files in a manner compatible with CADC
+
+=cut
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use File::Spec;
+use File::Temp qw/tempdir/;
+use Getopt::Long qw/GetOptionsFromString/;
+
+use JSA::Convert qw/convert_dr_files/;
+use JSA::Files qw/compare_file_lists scan_dir/;
+use JSA::Headers qw/get_orac_instrument read_headers/;
+use JSA::Logging qw/log_message log_warning/;
+use JSA::Starlink qw/check_star_env/;
+use JSA::WrapDR qw/prepare_environment prepare_environment_cadc
+                   retrieve_data determine_instrument
+                   run_pipeline capture_products
+                   clean_directory_final clean_directory_pre_capture/;
+use UKIRT::Archive qw/convert_ukirt_products ukirt_filename_is_archival/;
+
+print "Debugging information:\n*** ARGV:\n";
+print Dumper \@ARGV;
+print "*** ENV:\n";
+print Dumper \%ENV;
+
+
+# Read command line options.
+
+my ($id, $inputs, $drparameters, $parameters, $persist, $keep);
+
+GetOptions(
+    'id=s'           => \$id,
+    'inputs=s'       => \$inputs,
+
+    'drparameters=s' => \$drparameters,
+    'parameters=s'   => \$parameters,
+
+    'persist'        => \$persist,
+    'keep'           => \$keep,
+);
+
+if (defined $parameters) {
+    $parameters =~ s/^\"//;
+    $parameters =~ s/\"$//;
+
+    GetOptionsFromString($parameters,
+        "drparameters=s" => \$drparameters
+    );
+}
+
+if (defined $drparameters) {
+    $drparameters =~ s/^\s+//;
+    $drparameters =~ s/\s+$//;
+}
+
+$id = "NONE" unless defined $id;
+die 'Inputs file not specified' unless defined $inputs;
+
+
+# Prepare environment.
+
+prepare_environment();
+
+check_star_env('ORAC');
+
+my $curdir = File::Spec->rel2abs(File::Spec->curdir);
+$inputs = File::Spec->catfile($curdir, $inputs)
+    unless File::Spec->file_name_is_absolute($inputs);
+
+prepare_environment_cadc();
+
+print "Environment variables:\n";
+for my $env_variable (sort qw/PERL5LIB STARLINK_DIR SMURF_THREADS ORAC_DIR
+                              PATH ADAM_USER TMPDIR HDS_SCRATCH/) {
+  print "$env_variable: " . (defined($ENV{$env_variable}) ?
+                              $ENV{$env_variable}         :
+                              "undef" ) . "\n";
+}
+
+my $outdir = tempdir('UA_XXXXXXX', DIR => $curdir, CLEANUP => ! $keep);
+chdir($outdir) or die "Could not change directory to '$outdir'";
+log_message("Using temporary output directory '$outdir'\n");
+
+my %all_existing_files = scan_dir(qr/.*/);
+
+
+# Retrieve raw data.
+
+my %existing_files = scan_dir();
+
+retrieve_data($id, $inputs, 0);
+
+my %post_retrieve = scan_dir();
+
+# Compare the old list with the new to fet a list of files that
+# should be processed.
+my @files = compare_file_lists(\%existing_files, \%post_retrieve);
+
+log_message("Processing the following files:\n" . join("\n", @files) . "\n");
+
+
+# Keep only those files for which we can read the FITS headers,
+# and determine the name of the instrument.
+
+my %FITS = read_headers(@files);
+if (keys %FITS == 0) {
+    die "Could not open any of the supplied files to read headers: " .
+        join(", ", @files);
+} elsif (keys %FITS != @files) {
+    log_warning("Some file headers could not be read. " .
+                "Continuing with those that can\n");
+    @files = keys %FITS;
+}
+
+my $oracinst = determine_instrument(\%FITS);
+
+
+# Run the ORAC-DR pipeline.
+
+run_pipeline(1, $oracinst, undef, $outdir,
+             \@files, $drparameters);
+
+
+# Get a list of the newly created files, and read all the FITS headers
+# from these files.
+
+my %post_process = scan_dir();
+
+my @drfiles = compare_file_lists(\%post_retrieve, \%post_process);
+
+my %drhdrs = read_headers(@drfiles);
+
+
+# Convert data products to FITS.
+
+convert_ukirt_products($id, \%drhdrs);
+
+
+# Clean up the directory and capture data products.
+
+clean_directory_pre_capture($outdir, \%all_existing_files,
+                            \&ukirt_filename_is_archival);
+
+capture_products($id, $persist, undef, 'UKIRT', 0);
+
+clean_directory_final($outdir, \%all_existing_files) unless $keep;
+
+
+# Change back to original directory to allow temporary directory
+# to be deleted.
+
+chdir($curdir);
+
+exit 0;
+
+__END__
+
+=head1 COPYRIGHT
+
+Copyright (C) 2013 Science and Technology Facilities Council.
+All Rights Reserved.
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation; either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful,but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place,Suite 330, Boston, MA  02111-1307, USA
+
+=cut
