@@ -1,0 +1,8 @@
+*~
+*.swp
+*.bak
+/blib
+/Build
+/_build
+/*META*
+/UKIRT-Archive-*.tar.gz
