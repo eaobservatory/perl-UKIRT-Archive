@@ -10,6 +10,7 @@ my $build = new Module::Build(
     license       => 'gpl',
     requires => {
         'JSA::WrapDR' => '0.03',
+        'Number::Interval' => '0.06',
     },
     build_requires => {
         'Test::More' => 0,

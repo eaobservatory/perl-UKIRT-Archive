@@ -12,14 +12,18 @@ use warnings;
 use DateTime;
 use File::Copy;
 use File::Spec;
+use Number::Interval;
 
 use JSA::Convert qw/ndf2fits/;
 use JSA::Files qw/merge_pngs looks_like_drthumb/;
 use JSA::Headers qw/update_fits_product/;
 use JSA::Headers::Starlink qw/update_fits_headers add_fits_comments/;
+use JSA::Logging qw/log_warning/;
 
 use parent qw/Exporter/;
 our @EXPORT_OK = qw/convert_ukirt_products
+                    convert_ukirt_filename
+                    match_observation_numbers
                     ukirt_filename_is_archival
                     ukirt_file_is_product/;
 
@@ -106,6 +110,53 @@ sub convert_ukirt_filename {
     $file =~ s/\.sdf$/.fits/;
 
     return 'UKIRT_' . $file;
+}
+
+=item match_observation_numbers
+
+Separate a list of files into those which do and do not match the given
+list of observation numbers.
+
+    my ($files_cal, $files_sci) = match_observation_numbers(\@files, $obs_cal)
+
+This can be used to get lists of calibration and science files given a list
+of the calibration observation numbers.
+
+=cut
+
+sub match_observation_numbers {
+    my ($files, $obs_cal) = @_;
+
+    my @files_cal;
+    my @files_sci;
+
+    my @cal = map {
+        my ($min, $max) = /:/ ? (split /:/) : ($_, $_);
+        new Number::Interval(Min => $min, Max => $max,
+                             IncMin => 1, IncMax => 1);
+    } split ',', $obs_cal;
+
+    foreach my $file (@$files) {
+        # Could use ORAC-DR classes to handle the filenames but we expect
+        # UKIRT raw data filenames to match this pattern.
+        if ($file =~ /^[a-z][0-9]{8}_([0-9]{5})\./) {
+            my $obs = $1;
+            $obs =~ s/^0*//;
+            if (scalar grep {$_->contains($obs)} @cal) {
+                push @files_cal, $file;
+            }
+            else {
+                push @files_sci, $file;
+            }
+        }
+        else {
+            log_warning('Could not determine observation number for file ' .
+                        $file);
+            push @files_sci, $file;
+        }
+    }
+
+    return (\@files_cal, \@files_sci);
 }
 
 =item ukirt_filename_is_archival

@@ -23,7 +23,9 @@ use JSA::WrapDR qw/prepare_environment prepare_environment_cadc
                    retrieve_data determine_instrument
                    capture_products
                    clean_directory_final clean_directory_pre_capture/;
-use UKIRT::Archive qw/convert_ukirt_products ukirt_filename_is_archival/;
+use UKIRT::Archive qw/convert_ukirt_products
+                      match_observation_numbers
+                      ukirt_filename_is_archival/;
 use UKIRT::Archive::WrapDR qw/run_ukirt_pipeline/;
 
 print "Debugging information:\n*** ARGV:\n";
@@ -34,7 +36,7 @@ print Dumper \%ENV;
 
 # Read command line options.
 
-my ($id, $inputs, $drparameters, $parameters, $persist, $keep);
+my ($id, $inputs, $drparameters, $parameters, $persist, $keep, $obs_cal);
 
 GetOptions(
     'id=s'           => \$id,
@@ -45,6 +47,7 @@ GetOptions(
 
     'persist'        => \$persist,
     'keep'           => \$keep,
+    'obscal=s'       => \$obs_cal,
 );
 
 if (defined $parameters) {
@@ -52,7 +55,8 @@ if (defined $parameters) {
     $parameters =~ s/\"$//;
 
     GetOptionsFromString($parameters,
-        "drparameters=s" => \$drparameters
+        'drparameters=s' => \$drparameters,
+        'obscal=s'       => \$obs_cal,
     );
 }
 
@@ -123,9 +127,16 @@ if (keys %FITS == 0) {
 my $oracinst = determine_instrument(\%FITS);
 
 
-# Run the ORAC-DR pipeline.
+# Run the ORAC-DR pipeline on the calibrations and then on the
+# science observations.
 
-my $log_sci = run_ukirt_pipeline($oracinst, $outdir, \@files, $drparameters);
+my ($files_cal, $files_sci) = match_observation_numbers(\@files, $obs_cal);
+
+my ($log_cal, $log_sci);
+$log_cal = run_ukirt_pipeline($oracinst, $outdir, $files_cal, $drparameters)
+           if scalar @$files_cal;
+$log_sci = run_ukirt_pipeline($oracinst, $outdir, $files_sci, $drparameters)
+           if scalar @$files_sci;
 
 # Get a list of the newly created files, and read all the FITS headers
 # from these files.
