@@ -22,7 +22,8 @@ use parent qw/Exporter/;
 our @EXPORT_OK = qw/convert_ukirt_products
                     ukirt_filename_is_archival
                     ukirt_file_is_product/;
-our @VERSION = '0.001';
+
+our $VERSION = '0.001';
 
 =head1 SUBROUTINES
 
