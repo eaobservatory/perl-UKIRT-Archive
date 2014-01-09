@@ -26,7 +26,7 @@ use JSA::WrapDR qw/prepare_environment prepare_environment_cadc
 use UKIRT::Archive qw/convert_ukirt_products
                       match_observation_numbers
                       ukirt_filename_is_archival/;
-use UKIRT::Archive::WrapDR qw/run_ukirt_pipeline/;
+use UKIRT::Archive::WrapDR qw/combine_pipeline_logs run_ukirt_pipeline/;
 
 print "Debugging information:\n*** ARGV:\n";
 print Dumper \@ARGV;
@@ -131,12 +131,20 @@ my $oracinst = determine_instrument(\%FITS);
 # science observations.
 
 my ($files_cal, $files_sci) = match_observation_numbers(\@files, $obs_cal);
-
 my ($log_cal, $log_sci);
+
 $log_cal = run_ukirt_pipeline($oracinst, $outdir, $files_cal, $drparameters)
            if scalar @$files_cal;
+
+sleep 2; # Ensure the two runs produce differently named log files since
+         # the file names are based on the time.
+
 $log_sci = run_ukirt_pipeline($oracinst, $outdir, $files_sci, $drparameters)
            if scalar @$files_sci;
+
+combine_pipeline_logs($log_cal, $log_sci)
+    if (defined $log_cal) && (defined $log_sci);
+
 
 # Get a list of the newly created files, and read all the FITS headers
 # from these files.

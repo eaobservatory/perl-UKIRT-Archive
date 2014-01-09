@@ -9,18 +9,50 @@ UKIRT::Archive::WrapDR - UKIRT archive data reduction wrapping subroutines
 use strict;
 use warnings;
 
+use File::Spec;
 use IO::Dir;
+use IO::File;
 
 use JSA::WrapDR qw/run_pipeline/;
 
 use parent qw/Exporter/;
-our @EXPORT_OK = qw/run_ukirt_pipeline/;
+our @EXPORT_OK = qw/combine_pipeline_logs run_ukirt_pipeline/;
 
 our $VERSION = '0.001';
 
 =head1 SUBROUTINES
 
 =over 4
+
+=item combine_pipeline_logs
+
+Given two the names of two log files, append the second to the first and
+then delete it.  This should deal with trimming the HTML to produce a
+file which isn't more invalid than the input files.  It assumes the
+exact output format seen at the time of writing.
+
+=cut
+
+sub combine_pipeline_logs {
+    my ($log_cal, $log_sci) = @_;
+
+    my $fh_cal = new IO::File($log_cal, 'r+');
+    my $fh_sci = new IO::File($log_sci, 'r');
+
+    # Go back before the HTML footer in the first log.
+    $fh_cal->seek(-22, SEEK_END);
+
+    # Skip over header of the second log.
+    undef while <$fh_sci> !~ /^(?:&nbsp;)*System&nbsp;description:/;
+
+    print $fh_cal $_ foreach <$fh_sci>;
+
+    $fh_cal->close();
+    $fh_sci->close();
+
+    unlink $log_sci;
+}
+
 
 =item run_ukirt_pipeline
 
@@ -72,7 +104,7 @@ sub run_ukirt_pipeline {
     $dir->close();
 
     # Return the log file name if we were able uniquely to determine it.
-    return $logs[0] if 1 == scalar @logs;
+    return File::Spec->catfile($logdir, $logs[0]) if 1 == scalar @logs;
     return undef;
 }
 
