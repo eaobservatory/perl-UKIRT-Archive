@@ -92,7 +92,7 @@ sub run_ukirt_pipeline {
     $dir->close();
 
     run_pipeline(1, $oracinst, undef, $outdir,
-                $files, $drparameters);
+                $files, $drparameters, {batch => 0});
 
     # See what logs have been newly written.
     my @logs;
