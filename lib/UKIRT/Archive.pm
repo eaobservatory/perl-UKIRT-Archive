@@ -22,10 +22,8 @@ use JSA::Logging qw/log_warning/;
 
 use parent qw/Exporter/;
 our @EXPORT_OK = qw/convert_ukirt_products
-                    convert_ukirt_filename
                     match_observation_numbers
-                    ukirt_filename_is_archival
-                    ukirt_file_is_product/;
+                    ukirt_filename_is_archival/;
 
 our $VERSION = '0.001';
 
@@ -53,7 +51,7 @@ sub convert_ukirt_products {
     foreach my $file (sort keys %$href) {
         my $header = $href->{$file};
 
-        if (ukirt_file_is_product($file, $header)) {
+        if (ukirt_file_is_product($file)) {
             # Convert ORAC-DR product to FITS.
 
             # TODO: update provenance?
@@ -74,25 +72,24 @@ sub convert_ukirt_products {
 
             add_fits_comments($file, cadc_ukirt_acknowledgement());
 
-            my $outfile = convert_ukirt_filename($file);
+            my $outfile = convert_ukirt_filename($file, $header);
+            next unless defined $outfile;
             ndf2fits($file, $outfile);
 
             # Fix product names in extensions.  Is this necessary
             # for UKIRT?
-            update_fits_product($outfile);
+            # update_fits_product($outfile);
 
         }
         elsif (looks_like_drthumb($file)) {
-            # Rename PNG thumbnails and add to the thumbnail list.
+            # Add to the thumbnail list for later consideration.
 
-            my $outfile = convert_ukirt_filename($file);
-            copy($file, $outfile);
-            push @pngs, $outfile;
+            push @pngs, $file;
         }
     }
 
     # Combine thumbnail images.
-    merge_pngs(@pngs);
+    merge_ukirt_pngs(@pngs);
 }
 
 =item convert_ukirt_filename
@@ -106,10 +103,34 @@ TODO: add proper naming rules.
 
 sub convert_ukirt_filename {
     my $file = shift;
+    my $header = shift;
 
-    $file =~ s/\.sdf$/.fits/;
+    my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
+    return undef unless defined $inst;
 
-    return 'UKIRT_' . $file;
+    my $product = $header->value('PRODUCT');
+    return undef unless (defined $product) && ($product =~ /^[-_A-Za-z0-9]+$/);
+
+    return sprintf('UKIRT_%s_%s_%05d_%s.fits', $inst, $date, $obs, $product);
+}
+
+=item convert_ukirt_preview_filename
+
+Converts filenames for preview thumbnails.
+
+=cut
+
+sub convert_ukirt_preview_filename {
+    my $file = shift;
+
+    my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
+    return undef unless defined $inst;
+
+    return undef unless $suffix =~ /(?:rimg|rsp)_(\d+)$/;
+    my $size = $1;
+
+    # Thumbnails are always for the "reduced" product.
+    return sprintf('UKIRT_%s_%s_%05d_reduced_preview_%s.png', $inst, $date, $obs, $size);
 }
 
 =item match_observation_numbers
@@ -159,6 +180,63 @@ sub match_observation_numbers {
     return (\@files_cal, \@files_sci);
 }
 
+=item merge_ukirt_pngs
+
+Preview PNG image merging routine.  Similar to JSA::Files::merge_pngs but
+using the CAOM-2 convention (rsp on the left, rimg on the right, and
+no padding when one of these is missing).  It also adds handling for
+cases where only the rimg is present.
+
+=cut
+
+sub merge_ukirt_pngs {
+    my @files = @_;
+    my %newfiles = ();
+
+    my $montage = '/usr/bin/montage';
+    my $have_montage = -e $montage;
+
+    foreach my $file (@files) {
+        # Determine which new file this should be merged into.
+
+        my $newname = convert_ukirt_preview_filename($file);
+        next unless defined $newname;
+
+        if (exists $newfiles{$newname}) {
+            push @{$newfiles{$newname}}, $file;
+        }
+        else {
+            $newfiles{$newname} = [$file];
+        }
+    }
+
+    while (my ($new, $old) = each(%newfiles)) {
+        if (1 == scalar @$old) {
+            # If there is only one file then just copy it.
+
+            copy($old->[0], $new);
+        }
+        elsif (2 == scalar @$old) {
+            # If there are two files (and there should be no more
+            # as we only recognise rimg and rsp) then merge if possible.
+
+            my ($rimg, $rsp) = ($old->[0] =~ '_rimg_') ? @$old : ($old->[1], $old->[0]);
+
+            if ($have_montage) {
+                $new =~ /preview_(\d+)/;
+                my $size = $1;
+                system("$montage $rsp $rimg -tile 2x1 -geometry ${size}x${size}+0+0 $new");
+            }
+            else {
+                # Don't have montage available, so just pick one. Always rimg for now
+                # but maybe should default to rsp for spectrometers.
+
+                copy($rimg, $new);
+            }
+        }
+    }
+}
+
 =item ukirt_filename_is_archival
 
 Check whether the given filename follows the naming convention for
@@ -191,25 +269,50 @@ Analagous to C<JSA::Files::looks_like_cadcfile>.
 Determine whether a data file is a product which should be prepared
 for ingestion.
 
-TODO: add proper naming checks.
-
 =cut
 
 {
-    # Hash of filename patterns an header check subroutines.  Files
-    # will be determined to be products if the file name matches
-    # a pattern and the associated subroutine returns a true value
-    # given the header.
-    my %ukirt_product_patterns = (
-        qr/^g[kcimfu].*\.sdf$/ => sub {return 1;},
+    # Filename suffix list.  Note that there will also be a check that
+    # the PRODUCT header is present.
+    my @ukirt_product_patterns = (
+        # Polarimetry
+        'StokesI',
+        'StokesQ',
+        'StokesU',
+        'StokesV',
+        'polangle',
+        'polintensity',
+        'polpercent',
+
+        # Imaging
+        'mos',
+
+        # Spectroscopy
+        'aws',
+        'dbs',
+        'dbsi',
+        'fc',
+        'fci',
+
+        # IFU
+        'cube_fc',
+        'im_fc',
+        'sp_fc',
+        'im',
+        'sp',
+        'cube_dbs',
     );
 
     sub ukirt_file_is_product {
-        my ($file, $header) = @_;
+        my $file = shift;
 
-        while (my ($pattern, $filter) = each %ukirt_product_patterns) {
-            return 1 if $file =~ $pattern && $filter->($header);
-        }
+        my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
+        return 0 unless defined $inst;
+
+        # There are some products without suffices.
+        return 1 unless defined $suffix;
+
+        return 1 if grep {$_ eq $suffix} @ukirt_product_patterns;
 
         return 0;
     }
@@ -252,13 +355,49 @@ Return a reference to a CADC and UKIRT acknowledgement text.
     }
 }
 
+=item split_ukirt_filename
+
+Returns a list of components of a UKIRT reduced file name.
+
+    my ($inst, $date, $obs, $suffix) = split_ukirt_filename($filename);
+
+Returns undef on failure to match the filename.
+
+=cut
+
+{
+    my %ukirt_instruments = (
+        k => 'CGS3',
+        c => 'CGS4',
+        i => 'IRCAM3',
+        m => 'Michelle',
+        f => 'UFTI',
+        u => 'UIST',
+    );
+
+    sub split_ukirt_filename {
+        my $file = shift;
+
+        if ($file =~ /^g([u])(\d{8})_(\d+)_([-_A-Za-z0-9]+)\.(?:sdf|png)$/) {
+            return ($ukirt_instruments{$1}, $2, $3, $4);
+        }
+        elsif ($file =~ /^g([u])(\d{8})_(\d+).sdf$/) {
+            # Nastily-named no-extension product?
+            return ($ukirt_instruments{$1}, $2, $3, undef);
+        }
+        else {
+            return undef;
+        }
+    }
+}
+
 1;
 
 =back
 
 =head1 COPYRIGHT
 
-Copyright (C) 2013 Science and Technology Facilities Council.
+Copyright (C) 2013-2014 Science and Technology Facilities Council.
 All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
