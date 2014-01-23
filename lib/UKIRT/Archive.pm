@@ -68,6 +68,7 @@ sub convert_ukirt_products {
                 dpdate => $dpdate,
                 instream => 'UKIRT',
                 mode => '', # Dummy value to avoid uninitialized warnings
+                fitsmod_extra => ['D OBSERVER'],
             });
 
             add_fits_comments($file, cadc_ukirt_acknowledgement());
