@@ -77,9 +77,8 @@ sub convert_ukirt_products {
             next unless defined $outfile;
             ndf2fits($file, $outfile);
 
-            # Fix product names in extensions.  Is this necessary
-            # for UKIRT?
-            # update_fits_product($outfile);
+            # Fix product names in extensions.
+            update_fits_product($outfile);
 
         }
         elsif (looks_like_drthumb($file)) {
