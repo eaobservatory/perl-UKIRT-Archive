@@ -37,6 +37,7 @@ print Dumper \%ENV;
 # Read command line options.
 
 my ($id, $inputs, $drparameters, $parameters, $persist, $keep, $obs_cal);
+$obs_cal = ''; # Default: no observation to be treated specially.
 
 GetOptions(
     'id=s'           => \$id,
