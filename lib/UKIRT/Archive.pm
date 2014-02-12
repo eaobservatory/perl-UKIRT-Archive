@@ -12,10 +12,11 @@ use warnings;
 use DateTime;
 use File::Copy;
 use File::Spec;
+use File::Temp qw/tempfile/;
 use Number::Interval;
 
 use JSA::Convert qw/ndf2fits/;
-use JSA::Files qw/merge_pngs looks_like_drthumb/;
+use JSA::Files qw/looks_like_drthumb/;
 use JSA::Headers qw/update_fits_product/;
 use JSA::Headers::Starlink qw/update_fits_headers add_fits_comments/;
 use JSA::Logging qw/log_warning/;
@@ -33,7 +34,7 @@ our $VERSION = '0.001';
 
 =item convert_ukirt_products
 
-Convert ORAC-DR products into FITS files suitable for ingestion by
+Convert ORAC-DR products into FITS and PNG files suitable for ingestion by
 CADC.
 
 Analagous to C<JSA::Convert::convert_dr_files> which appears to be
@@ -46,7 +47,7 @@ sub convert_ukirt_products {
 
     my $dpdate = DateTime->now()->datetime();
 
-    my @pngs = ();
+    my %pngs = ();
 
     foreach my $file (sort keys %$href) {
         my $header = $href->{$file};
@@ -84,12 +85,12 @@ sub convert_ukirt_products {
         elsif (looks_like_drthumb($file)) {
             # Add to the thumbnail list for later consideration.
 
-            push @pngs, $file;
+            $pngs{$file} = $header;
         }
     }
 
     # Combine thumbnail images.
-    merge_ukirt_pngs(@pngs);
+    merge_ukirt_pngs(\%pngs);
 }
 
 =item convert_ukirt_filename
@@ -122,15 +123,30 @@ Converts filenames for preview thumbnails.
 
 sub convert_ukirt_preview_filename {
     my $file = shift;
+    my $header = shift;
+
+    my $keywords = $header->{'Keywords'};
+    return undef unless defined $keywords;
+    my $product = undef;
+
+    foreach (split /[;,]/, $keywords) {
+        s/^\s+//;
+        s/\s+$//;
+
+        if (s/^jsa:productID=//) {
+            $product = $_;
+            last;
+        }
+    }
+    return undef unless (defined $product) && ($product =~ /^[-_A-Za-z0-9]+$/);
 
     my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
     return undef unless defined $inst;
 
-    return undef unless $suffix =~ /(?:rimg|rsp)_(\d+)$/;
+    return undef unless $suffix =~ /(?:rimg|rsp)_(?:vector_)?(\d+)$/;
     my $size = $1;
 
-    # Thumbnails are always for the "reduced" product.
-    return sprintf('UKIRT_%s_%s_%05d_reduced_preview_%s.png', $inst, $date, $obs, $size);
+    return sprintf('UKIRT_%s_%s_%05d_%s_preview_%s.png', $inst, $date, $obs, $product, $size);
 }
 
 =item match_observation_numbers
@@ -190,16 +206,18 @@ cases where only the rimg is present.
 =cut
 
 sub merge_ukirt_pngs {
-    my @files = @_;
+    my $files = shift;
     my %newfiles = ();
 
     my $montage = '/usr/bin/montage';
+    my $composite = '/usr/bin/composite';
     my $have_montage = -e $montage;
+    my $have_composite = -e $composite;
 
-    foreach my $file (@files) {
+    while (my ($file, $header) = each %$files) {
         # Determine which new file this should be merged into.
 
-        my $newname = convert_ukirt_preview_filename($file);
+        my $newname = convert_ukirt_preview_filename($file, $header);
         next unless defined $newname;
 
         if (exists $newfiles{$newname}) {
@@ -210,28 +228,70 @@ sub merge_ukirt_pngs {
         }
     }
 
-    while (my ($new, $old) = each(%newfiles)) {
-        if (1 == scalar @$old) {
-            # If there is only one file then just copy it.
+    while (my ($new, $old) = each %newfiles) {
+        my @rimg = grep {/_rimg_/} @$old;
+        my @rsp = grep {/_rsp_/} @$old;
 
-            copy($old->[0], $new);
+        foreach my $type (\@rimg, \@rsp) {
+            next
+                if 2 > scalar @$type;
+            die 'Too many PNG files of the same type for ' . $new
+                if 2 < scalar @$type;
+
+            my @bg = grep {! /_vector_/} @$type;
+            my @vc = grep {/_vector_/} @$type;
+
+            die 'Could not identify background and vector for ' . $new
+                unless (1 == scalar @bg) and (1 == scalar @vc);
+
+            if ($have_composite) {
+                my (undef, $tmp) = tempfile('merge_XXXX', OPEN => 0,
+                    DIR => File::Spec->curdir(), SUFFIX => '.png');
+
+                system("$composite -compose lighten $vc[0] $bg[0] $tmp");
+
+                @$type = ($tmp);
+            }
+            else {
+                # Vectors are white and the previous will probably be shown on
+                # a while background, so the background image is probably
+                # better if we can't merge them.
+
+                @$type = ($bg[0]);
+            }
         }
-        elsif (2 == scalar @$old) {
-            # If there are two files (and there should be no more
-            # as we only recognise rimg and rsp) then merge if possible.
 
-            my ($rimg, $rsp) = ($old->[0] =~ '_rimg_') ? @$old : ($old->[1], $old->[0]);
+        unless (@rimg or @rsp) {
+            # It's an error if the files we previously matched are no longer
+            # in our lists.
+
+            die 'No rimg or rsp PNG files remaining for ' . $new;
+        }
+        elsif (@rimg and not @rsp) {
+            # If there is only one file then just copy it.  Note that the @rimg
+            # and @rsp arrays should have just one entry now.  They're arrays
+            # because we needed to call grep in array context.
+
+            copy($rimg[0], $new);
+        }
+        elsif (@rsp and not @rimg) {
+            # Same as above, but rsp only.
+
+            copy($rsp[0], $new);
+        }
+        else {
+            # If there are both types then merge if possible.
 
             if ($have_montage) {
                 $new =~ /preview_(\d+)/;
                 my $size = $1;
-                system("$montage $rsp $rimg -tile 2x1 -geometry ${size}x${size}+0+0 $new");
+                system("$montage $rsp[0] $rimg[0] -tile 2x1 -geometry ${size}x${size}+0+0 $new");
             }
             else {
                 # Don't have montage available, so just pick one. Always rimg for now
                 # but maybe should default to rsp for spectrometers.
 
-                copy($rimg, $new);
+                copy($rimg[0], $new);
             }
         }
     }
