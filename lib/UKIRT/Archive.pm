@@ -379,18 +379,28 @@ for ingestion.
     # the PRODUCT header is present.
     my @ukirt_product_patterns = (
         # Polarimetry
-        'StokesI',
-        'StokesQ',
-        'StokesU',
-        'StokesV',
-        'polangle',
-        'polintensity',
-        'polpercent',
+        'I',
+        'Q',
+        'U',
+        'V',
+        'TH',
+        'PI',
+        'P',
+
+        # Spectro-polarimetry
+        'sp-I',
+        'sp-Q',
+        'sp-U',
+        'sp-V',
+        'sp-TH',
+        'sp-PI',
+        'sp-P',
 
         # Imaging
         'mos',
 
         # Spectroscopy
+        'dif', # (also IFU)
         'aws',
         'dbs',
         'dbsi',
@@ -411,9 +421,6 @@ for ingestion.
 
         my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
         return 0 unless defined $inst;
-
-        # There are some products without suffices.
-        return 1 unless defined $suffix;
 
         return 1 if grep {$_ eq $suffix} @ukirt_product_patterns;
 
