@@ -48,46 +48,22 @@ sub convert_ukirt_products {
     my $dpdate = DateTime->now()->datetime();
 
     my %pngs = ();
+    my %sdfs = ();
 
     foreach my $file (sort keys %$href) {
         my $header = $href->{$file};
 
         if (ukirt_file_is_product($file)) {
-            # Convert ORAC-DR product to FITS.
-
-            # TODO: update provenance?
-            # See JSA::Convert::convert_dr_files call to
-            # prov_update_parent_path for JSA example.
-
-            # TODO: set WCS attributes?
-            # See JSA::Convert::convert_dr_files call to
-            # set_wcs_attrib, but that subroutine sets
-            # the third axis to FREQ for JCMT.
-
-            update_fits_headers($file, {
-                dpid => $dpid,
-                dpdate => $dpdate,
-                instream => 'UKIRT',
-                mode => '', # Dummy value to avoid uninitialized warnings
-                fitsmod_extra => ['D OBSERVER'],
-            });
-
-            add_fits_comments($file, cadc_ukirt_acknowledgement());
-
-            my $outfile = convert_ukirt_filename($file, $header);
-            next unless defined $outfile;
-            ndf2fits($file, $outfile);
-
-            # Fix product names in extensions.
-            update_fits_product($outfile);
+            $sdfs{$file} = $header;
 
         }
         elsif (looks_like_drthumb($file)) {
-            # Add to the thumbnail list for later consideration.
-
             $pngs{$file} = $header;
         }
     }
+
+    # Convert ORAC-DR products to FITS.
+    convert_ukirt_sdfs($dpid, $dpdate, \%sdfs);
 
     # Combine thumbnail images.
     merge_ukirt_pngs(\%pngs);
@@ -95,16 +71,15 @@ sub convert_ukirt_products {
 
 =item convert_ukirt_filename
 
-Rename a file to follow the naming convention for reduced UKIRT
-data in the CADC archive.
-
-TODO: add proper naming rules.
+Return the new name of a file to following the naming convention for reduced
+UKIRT data in the CADC archive.
 
 =cut
 
 sub convert_ukirt_filename {
     my $file = shift;
     my $header = shift;
+    my $include_suffix = shift;
 
     my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
     return undef unless defined $inst;
@@ -112,7 +87,11 @@ sub convert_ukirt_filename {
     my $product = $header->value('PRODUCT');
     return undef unless (defined $product) && ($product =~ /^[-_A-Za-z0-9]+$/);
 
-    return sprintf('UKIRT_%s_%s_%05d_%s.fits', $inst, $date, $obs, $product);
+    return sprintf('UKIRT_%s_%s_%05d_%s.fits', $inst, $date, $obs, $product)
+        unless $include_suffix;
+
+    return sprintf('UKIRT_%s_%s_%05d_%s_%s.fits', $inst, $date, $obs, $product,
+        $suffix);
 }
 
 =item convert_ukirt_preview_filename
@@ -147,6 +126,70 @@ sub convert_ukirt_preview_filename {
     my $size = $1;
 
     return sprintf('UKIRT_%s_%s_%05d_%s_preview_%s.png', $inst, $date, $obs, $product, $size);
+}
+
+=item convert_ukirt_sdfs
+
+Convert ORAC-DR-produced SDF files into FITS files for ingestion by CADC.
+
+=cut
+
+sub convert_ukirt_sdfs {
+    my $dpid = shift;
+    my $dpdate = shift;
+    my $sdfs = shift;
+
+    my %new_name = ();
+    my %new_name_count = ();
+
+    # Go through the list of files, rejecting those for which
+    # we cannot determine a new file name, and make a list of the
+    # new files.  Also record how many times each new name appears.
+    foreach my $file (sort keys %$sdfs) {
+        my $outfile = convert_ukirt_filename($file, $sdfs->{$file}, 0);
+        next unless defined $outfile;
+
+        $new_name{$file} = $outfile;
+        $new_name_count{$outfile} ++;
+    }
+
+    # Go through the files a second time to actually perform the
+    # conversion.
+    while (my ($file, $outfile) = each %new_name) {
+        # Are we trying to produce more than one file with this
+        # new file name?  If so, then re-generate the name, but
+        # including the original file suffix in order to
+        # distinguish them.  This is to allow there to be planes
+        # in CAOM-2 (corresponding to one product ID) containing
+        # more than one file.
+
+        $outfile = convert_ukirt_filename($file, $sdfs->{$file}, 1)
+            if $new_name_count{$outfile} > 1;
+
+        # TODO: update provenance?
+        # See JSA::Convert::convert_dr_files call to
+        # prov_update_parent_path for JSA example.
+
+        # TODO: set WCS attributes?
+        # See JSA::Convert::convert_dr_files call to
+        # set_wcs_attrib, but that subroutine sets
+        # the third axis to FREQ for JCMT.
+
+        update_fits_headers($file, {
+            dpid => $dpid,
+            dpdate => $dpdate,
+            instream => 'UKIRT',
+            mode => '', # Dummy value to avoid uninitialized warnings
+            fitsmod_extra => ['D OBSERVER'],
+        });
+
+        add_fits_comments($file, cadc_ukirt_acknowledgement());
+
+        ndf2fits($file, $outfile);
+
+        # Fix product names in extensions.
+        update_fits_product($outfile);
+    }
 }
 
 =item match_observation_numbers
