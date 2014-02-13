@@ -370,7 +370,7 @@ sub merge_ukirt_png_vec_bg {
         return $tmp;
     }
     else {
-        # Vectors are white and the previous will probably be shown on
+        # Vectors are white and the previews will probably be shown on
         # a while background, so the background image is probably
         # better if we can't merge them.
 
@@ -389,6 +389,11 @@ sub merge_ukirt_png_multicolor {
                              Filter => $1)->wavelength() => $_;
     } @_;
     my @png = @png{sort keys %png};
+
+    # In case we don't have composite available, check there is at
+    # least one thumbnail, and return it.
+    die 'Lost the multi-colour thumbnails while sorting' unless scalar @png;
+    return $png[0] unless $have_composite;
 
     if (1 == scalar @png) {
         die 'Attempting to merge only one multi-color thumbnail';
