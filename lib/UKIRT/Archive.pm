@@ -261,14 +261,14 @@ cases where only the rimg is present.
 
 =cut
 
+my $montage = '/usr/bin/montage';
+my $have_montage = -e $montage;
+my $composite = '/usr/bin/composite';
+my $have_composite = -e $composite;
+
 sub merge_ukirt_pngs {
     my $files = shift;
     my %newfiles = ();
-
-    my $montage = '/usr/bin/montage';
-    my $composite = '/usr/bin/composite';
-    my $have_montage = -e $montage;
-    my $have_composite = -e $composite;
 
     while (my ($file, $header) = each %$files) {
         # Determine which new file this should be merged into.
@@ -289,32 +289,30 @@ sub merge_ukirt_pngs {
         my @rsp = grep {/_rsp_/} @$old;
 
         foreach my $type (\@rimg, \@rsp) {
-            next
-                if 2 > scalar @$type;
-            die 'Too many PNG files of the same type for ' . $new
-                if 2 < scalar @$type;
+            next if 2 > scalar @$type;
 
-            my @bg = grep {! /_vector_/} @$type;
-            my @vc = grep {/_vector_/} @$type;
+            my ($instrument, undef, undef, undef) = split_ukirt_filename($type->[0]);
 
-            die 'Could not identify background and vector for ' . $new
-                unless (1 == scalar @bg) and (1 == scalar @vc);
+            if (2 == scalar @$type and 1 == scalar grep {/_vector_/} @$type) {
+                # One vector plot, and another image onto which to overlay it.
 
-            if ($have_composite) {
-                my (undef, $tmp) = tempfile('merge_XXXX', OPEN => 0,
-                    DIR => File::Spec->curdir(), SUFFIX => '.png');
+                @$type = merge_ukirt_png_vec_bg(@$type);
+            }
+            elsif ((scalar @$type) == (scalar grep {/_\d+_(.+)_(?:rimg|rsp)/
+                    and Astro::WaveBand::has_filter($instrument, $1)} @$type)) {
+                # All images are of different filters (multi-color mode).
 
-                system("$composite -compose lighten $vc[0] $bg[0] $tmp");
-
-                @$type = ($tmp);
+                @$type = merge_ukirt_png_multicolor($instrument, @$type);
             }
             else {
-                # Vectors are white and the previous will probably be shown on
-                # a while background, so the background image is probably
-                # better if we can't merge them.
+                # This error is no longer fatal because having the
+                # thumbnails isn't essential to the data reduction
+                # process.
 
-                @$type = ($bg[0]);
+                print "WARNING: found too many thumbnails of the same type\n";
+                print ' for ' . $new . " and can not merge them.\n";
             }
+
         }
 
         unless (@rimg or @rsp) {
@@ -339,7 +337,7 @@ sub merge_ukirt_pngs {
             # If there are both types then merge if possible.
 
             if ($have_montage) {
-                $new =~ /preview_(\d+)/;
+                die 'Can not determine size' unless $new =~ /preview_(\d+)/;
                 my $size = $1;
                 system("$montage $rsp[0] $rimg[0] -tile 2x1 -geometry ${size}x${size}+0+0 $new");
             }
@@ -350,6 +348,82 @@ sub merge_ukirt_pngs {
                 copy($rimg[0], $new);
             }
         }
+    }
+}
+
+sub merge_ukirt_png_vec_bg {
+    my @bg = grep {! /_vector_/} @_;
+    my @vc = grep {/_vector_/} @_;
+
+    # This subroutine should only be called if there is one
+    # map and one vector plot, so raise an error if they
+    # can not be identified.
+    die 'Could not identify background and vector from: ' . join(' ', @_)
+        unless (1 == scalar @bg) and (1 == scalar @vc);
+
+    if ($have_composite) {
+        my (undef, $tmp) = tempfile('merge_XXXXXX', OPEN => 0,
+            DIR => File::Spec->curdir(), SUFFIX => '.png');
+
+        system("$composite -compose lighten $vc[0] $bg[0] $tmp");
+
+        return $tmp;
+    }
+    else {
+        # Vectors are white and the previous will probably be shown on
+        # a while background, so the background image is probably
+        # better if we can't merge them.
+
+        return $bg[0];
+    }
+}
+
+sub merge_ukirt_png_multicolor {
+    my $instrument = shift;
+
+    # Sort thumbnails into wavelength order.
+    my %png = map {
+        die 'Filter name vanished from thumbnail name'
+            unless /_\d+_(.+)_(?:rimg|rsp)/;
+        Astro::WaveBand->new(Instrument => $instrument,
+                             Filter => $1)->wavelength() => $_;
+    } @_;
+    my @png = @png{sort keys %png};
+
+    if (1 == scalar @png) {
+        die 'Attempting to merge only one multi-color thumbnail';
+    }
+    elsif (2 == scalar @png) {
+        die 'Can not determine size' unless $png[0] =~ /_(\d+)\.png/;
+        my $size = $1;
+
+        my (undef, $tmp) = tempfile('merge_XXXXXX', OPEN => 0,
+            DIR => File::Spec->curdir(), SUFFIX => '.png');
+
+        system("$composite -compose copyBlue $png[0] -size ${size}x${size} canvas:black $tmp");
+
+        my (undef, $tmp2) = tempfile('merge_XXXXXX', OPEN => 0,
+            DIR => File::Spec->curdir(), SUFFIX => '.png');
+
+        system("$composite -compose copyRed $png[1] $tmp $tmp2");
+
+        return $tmp2;
+    }
+    else {
+        # We have 3 or more images, but we can't make a RGB composite of more
+        # than three -- therefore just merge the first three we have.
+
+        my (undef, $tmp) = tempfile('merge_XXXXXX', OPEN => 0,
+            DIR => File::Spec->curdir(), SUFFIX => '.png');
+
+        system("$composite -compose copyBlue $png[0] $png[1] $tmp");
+
+        my (undef, $tmp2) = tempfile('merge_XXXXXX', OPEN => 0,
+            DIR => File::Spec->curdir(), SUFFIX => '.png');
+
+        system("$composite -compose copyRed $png[2] $tmp $tmp2");
+
+        return $tmp2;
     }
 }
 
