@@ -15,6 +15,7 @@ use File::Spec;
 use File::Temp qw/tempfile/;
 use Number::Interval;
 
+use Astro::WaveBand;
 use JSA::Convert qw/ndf2fits/;
 use JSA::Files qw/looks_like_drthumb/;
 use JSA::Headers qw/update_fits_product/;
@@ -80,6 +81,7 @@ sub convert_ukirt_filename {
     my $file = shift;
     my $header = shift;
     my $include_suffix = shift;
+    my $include_mos = shift;
 
     my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
     return undef unless defined $inst;
@@ -89,6 +91,8 @@ sub convert_ukirt_filename {
 
     return sprintf('UKIRT_%s_%s_%05d_%s.fits', $inst, $date, $obs, $product)
         unless $include_suffix;
+
+    $suffix =~ s/_mos// unless $include_mos;
 
     return sprintf('UKIRT_%s_%s_%05d_%s_%s.fits', $inst, $date, $obs, $product,
         $suffix);
@@ -146,7 +150,7 @@ sub convert_ukirt_sdfs {
     # we cannot determine a new file name, and make a list of the
     # new files.  Also record how many times each new name appears.
     foreach my $file (sort keys %$sdfs) {
-        my $outfile = convert_ukirt_filename($file, $sdfs->{$file}, 0);
+        my $outfile = convert_ukirt_filename($file, $sdfs->{$file}, 0, 0);
         next unless defined $outfile;
 
         $new_name{$file} = $outfile;
@@ -161,10 +165,19 @@ sub convert_ukirt_sdfs {
         # including the original file suffix in order to
         # distinguish them.  This is to allow there to be planes
         # in CAOM-2 (corresponding to one product ID) containing
-        # more than one file.
+        # more than one file.  Also try to leave out a _mos part
+        # of the suffix, to improve the file names for multi-color
+        # imaging.
 
-        $outfile = convert_ukirt_filename($file, $sdfs->{$file}, 1)
-            if $new_name_count{$outfile} > 1;
+        if ($new_name_count{$outfile} > 1) {
+            $outfile = convert_ukirt_filename($file, $sdfs->{$file}, 1, 0);
+            $new_name_count{$outfile} ++;
+
+            if ($new_name_count{$outfile} > 1) {
+                $outfile = convert_ukirt_filename($file, $sdfs->{$file}, 1, 1);
+                $new_name_count{$outfile} ++;
+            }
+        }
 
         # TODO: update provenance?
         # See JSA::Convert::convert_dr_files call to
@@ -424,6 +437,13 @@ for ingestion.
                     and defined $suffix;
 
         return 1 if grep {$_ eq $suffix} @ukirt_product_patterns;
+
+        # Special case for multi-color "mos" files.  We need to check
+        # if we have a valid filter name to avoid matching other
+        # files ending *_mos which we don't want.
+        if ($suffix =~ /(.+)_mos/) {
+            return 1 if Astro::WaveBand::has_filter($inst, $1);
+        }
 
         return 0;
     }
