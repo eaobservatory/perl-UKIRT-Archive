@@ -420,7 +420,8 @@ for ingestion.
         my $file = shift;
 
         my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
-        return 0 unless defined $inst;
+        return 0 unless defined $inst
+                    and defined $suffix;
 
         return 1 if grep {$_ eq $suffix} @ukirt_product_patterns;
 
