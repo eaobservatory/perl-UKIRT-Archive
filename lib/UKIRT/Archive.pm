@@ -388,7 +388,7 @@ sub merge_ukirt_png_multicolor {
         Astro::WaveBand->new(Instrument => $instrument,
                              Filter => $1)->wavelength() => $_;
     } @_;
-    my @png = @png{sort keys %png};
+    my @png = @png{sort {$a <=> $b} keys %png};
 
     # In case we don't have composite available, check there is at
     # least one thumbnail, and return it.
