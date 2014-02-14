@@ -299,7 +299,7 @@ sub merge_ukirt_pngs {
                 @$type = merge_ukirt_png_vec_bg(@$type);
             }
             elsif ((scalar @$type) == (scalar grep {/_\d+_(.+)_(?:rimg|rsp)/
-                    and Astro::WaveBand::has_filter($instrument, $1)} @$type)) {
+                    and has_filter_fuzzy($instrument, $1)} @$type)) {
                 # All images are of different filters (multi-color mode).
 
                 @$type = merge_ukirt_png_multicolor($instrument, @$type);
@@ -385,8 +385,11 @@ sub merge_ukirt_png_multicolor {
     my %png = map {
         die 'Filter name vanished from thumbnail name'
             unless /_\d+_(.+)_(?:rimg|rsp)/;
+        my $filter = has_filter_fuzzy($instrument, $1);
+        die 'Filter name suddenly became invalid'
+            unless defined $filter;
         Astro::WaveBand->new(Instrument => $instrument,
-                             Filter => $1)->wavelength() => $_;
+                             Filter => $filter)->wavelength() => $_;
     } @_;
     my @png = @png{sort {$a <=> $b} keys %png};
 
@@ -521,7 +524,7 @@ for ingestion.
         # if we have a valid filter name to avoid matching other
         # files ending *_mos which we don't want.
         if ($suffix =~ /(.+)_mos/) {
-            return 1 if Astro::WaveBand::has_filter($inst, $1);
+            return 1 if has_filter_fuzzy($inst, $1);
         }
 
         return 0;
@@ -563,6 +566,62 @@ Return a reference to a CADC and UKIRT acknowledgement text.
         }
         return $acknowledgement_text;
     }
+}
+
+=item has_filter_fuzzy
+
+Check whether an instrument has a given filter when the name of the filter
+has been mangled by ORAC-DR for use in a file name by applying these
+replacements:
+
+    $hdsfilter =~ s/\./p/g;
+    $hdsfilter =~ tr/\(\)\[\]/d/;
+
+If the filter is found, return the un-mangled filter name, otherwise
+return undef.
+
+=cut
+
+sub has_filter_fuzzy {
+    my $instrument = shift;
+    my $hdsfilter = shift;
+
+    # Expand the potential filter name into the list of all possible
+    # pre-replacement strings.
+
+    my @poss = ('');
+
+    foreach my $char (split //, $hdsfilter) {
+        if ($char eq 'p') {
+            @poss = (
+                (map {$_ . 'p'} @poss),
+                (map {$_ . '.'} @poss),
+            );
+        }
+        elsif ($char eq 'd') {
+            @poss = (
+                (map {$_ . 'd'} @poss),
+                (map {$_ . '('} @poss),
+                (map {$_ . ')'} @poss),
+                (map {$_ . '['} @poss),
+                (map {$_ . ']'} @poss),
+            );
+        }
+        else {
+            @poss = map {$_ . $char} @poss;
+        }
+    }
+
+    # Now check whether any of the possible strings is a filter for the
+    # given instrument.  We have to do it this way because Astro::WaveBand
+    # has its list of filters in a "my" variable and only offers the
+    # "has_filter" subroutine which performs exact matches.
+
+    foreach my $filter (@poss) {
+        return $filter if Astro::WaveBand::has_filter($instrument, $filter);
+    }
+
+    return undef;
 }
 
 =item split_ukirt_filename
