@@ -116,7 +116,7 @@ sub convert_ukirt_preview_filename {
         s/^\s+//;
         s/\s+$//;
 
-        if (s/^jsa:productID=//) {
+        if (s/^jsa:product=//) {
             $product = $_;
             last;
         }
