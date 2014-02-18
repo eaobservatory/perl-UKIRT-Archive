@@ -501,6 +501,8 @@ for ingestion.
         'dbsi',
         'fc',
         'fci',
+        'arc',
+        'standard',
 
         # IFU
         'cube_fc',
