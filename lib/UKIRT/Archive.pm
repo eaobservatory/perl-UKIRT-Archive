@@ -15,6 +15,7 @@ use File::Spec;
 use File::Temp qw/tempfile/;
 use Number::Interval;
 
+use Astro::FITS::CFITSIO qw/:constants/;
 use Astro::WaveBand;
 use JSA::Convert qw/ndf2fits/;
 use JSA::Files qw/looks_like_drthumb/;
@@ -50,13 +51,16 @@ sub convert_ukirt_products {
 
     my %pngs = ();
     my %sdfs = ();
+    my %catalogs = ();
 
     foreach my $file (sort keys %$href) {
         my $header = $href->{$file};
 
         if (ukirt_file_is_product($file)) {
             $sdfs{$file} = $header;
-
+        }
+        elsif (ukirt_file_is_catalog_product($file)) {
+            $catalogs{$file} = $header;
         }
         elsif (looks_like_drthumb($file)) {
             $pngs{$file} = $header;
@@ -65,6 +69,9 @@ sub convert_ukirt_products {
 
     # Convert ORAC-DR products to FITS.
     convert_ukirt_sdfs($dpid, $dpdate, \%sdfs);
+
+    # Rename ORAC-DR catalog product FITS files.
+    convert_ukirt_catalogs($dpid, $dpdate, \%catalogs);
 
     # Combine thumbnail images.
     merge_ukirt_pngs(\%pngs);
@@ -199,6 +206,55 @@ sub convert_ukirt_sdfs {
         add_fits_comments($file, cadc_ukirt_acknowledgement());
 
         ndf2fits($file, $outfile);
+
+        # Fix product names in extensions.
+        update_fits_product($outfile);
+    }
+}
+
+=item convert_ukirt_catalogs
+
+Convert ORAC-DR-produced catalog files into FITS files for ingestion by CADC.
+
+=cut
+
+sub convert_ukirt_catalogs {
+    my $dpid = shift;
+    my $dpdate = shift;
+    my $catalogs = shift;
+
+    while (my ($file, $header) = each %$catalogs) {
+        my $product = $header->value('PRODUCT');
+        next unless (defined $product) && ($product =~ /^[-_A-Za-z0-9]+$/);
+
+        my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
+        next unless defined $inst;
+
+        my $outfile = sprintf('UKIRT_%s_%s_%05d_%s_catalog.fits',
+                              $inst, $date, $obs, $product);
+
+        copy($file, $outfile);
+
+        # Add FITS headers similarly to how it's done for sdf
+        # files by update_fits_headers().
+
+        my $status = 0;
+        my $fits = Astro::FITS::CFITSIO::open_file($outfile, READWRITE,
+                                                   $status);
+        if ($status) {
+            print "WARNING: failed to open catalog to update header\n";
+        }
+        else {
+            $fits->update_key(TSTRING, 'INSTREAM', 'UKIRT',
+                              'Source of input stream', $status);
+            $fits->update_key(TSTRING, 'DPDATE', $dpdate,
+                              'Data processing date', $status);
+            $fits->update_key(TSTRING, 'DPRCINST', $dpid,
+                              'Data processing recipe instance ID', $status);
+            $fits->write_comment($_, $status)
+                foreach @{cadc_ukirt_acknowledgement()};
+            $fits->close_file($status);
+        }
 
         # Fix product names in extensions.
         update_fits_product($outfile);
@@ -516,6 +572,8 @@ for ingestion.
     sub ukirt_file_is_product {
         my $file = shift;
 
+        return 0 unless $file =~ /\.sdf$/;
+
         my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
         return 0 unless defined $inst
                     and defined $suffix;
@@ -531,6 +589,21 @@ for ingestion.
 
         return 0;
     }
+}
+
+sub ukirt_file_is_catalog_product {
+    my $file = shift;
+
+    return 0 unless $file =~ /\.FIT$/;
+
+    my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
+    return 0 unless defined $inst
+                and defined $suffix;
+
+    # Accept any catalog.  Note that we will also check that there
+    # is a product header later.
+
+    return 1;
 }
 
 =back
@@ -649,7 +722,7 @@ Returns undef on failure to match the filename.
     sub split_ukirt_filename {
         my $file = shift;
 
-        if ($file =~ /^g([u])(\d{8})_(\d+)_([-_A-Za-z0-9]+)\.(?:sdf|png)$/) {
+        if ($file =~ /^g([u])(\d{8})_(\d+)_([-_A-Za-z0-9]+)\.(?:sdf|png|FIT)$/) {
             return ($ukirt_instruments{$1}, $2, $3, $4);
         }
         elsif ($file =~ /^g([u])(\d{8})_(\d+).sdf$/) {
