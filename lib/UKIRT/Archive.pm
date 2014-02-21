@@ -564,9 +564,12 @@ for ingestion.
         'cube_fc',
         'im_fc',
         'sp_fc',
+        'cube',
         'im',
         'sp',
         'cube_dbs',
+        'im_dbs',
+        'sp_dbs',
     );
 
     sub ukirt_file_is_product {
