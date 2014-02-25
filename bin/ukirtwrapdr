@@ -36,8 +36,9 @@ print Dumper \%ENV;
 
 # Read command line options.
 
-my ($id, $inputs, $drparameters, $parameters, $persist, $keep, $obs_cal);
-$obs_cal = ''; # Default: no observation to be treated specially.
+my ($id, $inputs, $drparameters, $parameters, $persist, $keep);
+my $obs_cal = ''; # Default: no observation to be treated specially.
+my $obs_std = ''; # Default: no observation to be treated specially.
 
 # Options to allow for easier testing.
 
@@ -53,6 +54,7 @@ GetOptions(
     'persist'        => \$persist,
     'keep'           => \$keep,
     'obscal=s'       => \$obs_cal,
+    'obsstd=s'       => \$obs_std,
 
     # For testing:
     'reduced_dir=s'  => \$reduced_dir,    # Start with reduced products from
@@ -68,6 +70,7 @@ if (defined $parameters) {
     GetOptionsFromString($parameters,
         'drparameters=s' => \$drparameters,
         'obscal=s'       => \$obs_cal,
+        'obsstd=s'       => \$obs_std,
     );
 }
 
@@ -157,20 +160,43 @@ else {
     # Run the ORAC-DR pipeline on the calibrations and then on the
     # science observations.
 
-    my ($files_cal, $files_sci) = match_observation_numbers(\@files, $obs_cal);
-    my ($log_cal, $log_sci);
+    my ($files_cal, $files_stdsci) =
+            match_observation_numbers(\@files, $obs_cal);
+    my ($files_std, $files_sci) =
+            match_observation_numbers($files_stdsci, $obs_std);
+    my ($log_cal, $log_std, $log_sci);
 
-    $log_cal = run_ukirt_pipeline($oracinst, $outdir, $files_cal, $drparameters)
-               if scalar @$files_cal;
+    if (scalar @$files_cal) {
+        $log_cal = run_ukirt_pipeline($oracinst, $outdir, $files_cal,
+                                      $drparameters);
 
-    sleep 2; # Ensure the two runs produce differently named log files since
-             # the file names are based on the time.
+        sleep 2; # Ensure the runs produce differently named log files
+                 # since the file names are based on the time.
+    }
 
-    $log_sci = run_ukirt_pipeline($oracinst, $outdir, $files_sci, $drparameters)
-               if scalar @$files_sci;
+    if (scalar @$files_std) {
+        $log_std = run_ukirt_pipeline($oracinst, $outdir, $files_std,
+                                      $drparameters);
 
-    combine_pipeline_logs($log_cal, $log_sci)
-        if (defined $log_cal) && (defined $log_sci);
+        sleep 2; # Ensure the runs produce differently named log files
+                 # since the file names are based on the time.
+
+        if ((defined $log_cal) and (defined $log_std)) {
+            combine_pipeline_logs($log_cal, $log_std);
+        }
+        else {
+            $log_cal = $log_std;
+        }
+    }
+
+    if (scalar @$files_sci) {
+        $log_sci = run_ukirt_pipeline($oracinst, $outdir, $files_sci,
+                                     $drparameters);
+
+        if ((defined $log_cal) and (defined $log_sci)) {
+            combine_pipeline_logs($log_cal, $log_sci);
+        }
+    }
 
     exit(0) if $abort_after_dr;
 
