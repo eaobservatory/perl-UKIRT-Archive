@@ -43,7 +43,8 @@ sub combine_pipeline_logs {
     $fh_cal->seek(-22, SEEK_END);
 
     # Skip over header of the second log.
-    undef while <$fh_sci> !~ /^(?:&nbsp;)*System&nbsp;description:/;
+    undef while <$fh_sci> !~ /^(?:&nbsp;)*System&nbsp;description:/
+          and not $fh_sci->eof();
 
     print $fh_cal $_ foreach <$fh_sci>;
 
