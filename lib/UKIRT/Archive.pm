@@ -725,10 +725,10 @@ Returns undef on failure to match the filename.
     sub split_ukirt_filename {
         my $file = shift;
 
-        if ($file =~ /^g([u])(\d{8})_(\d+)_([-_A-Za-z0-9]+)\.(?:sdf|png|FIT)$/) {
+        if ($file =~ /^g([kcimfu])(\d{8})_(\d+)_([-_A-Za-z0-9]+)\.(?:sdf|png|FIT)$/) {
             return ($ukirt_instruments{$1}, $2, $3, $4);
         }
-        elsif ($file =~ /^g([u])(\d{8})_(\d+).sdf$/) {
+        elsif ($file =~ /^g([kcimfu])(\d{8})_(\d+).sdf$/) {
             # Nastily-named no-extension product?
             return ($ukirt_instruments{$1}, $2, $3, undef);
         }
