@@ -24,6 +24,7 @@ use JSA::WrapDR qw/prepare_environment prepare_environment_cadc
                    capture_products
                    clean_directory_final clean_directory_pre_capture/;
 use UKIRT::Archive qw/convert_ukirt_products
+                      convert_ukirt_logs
                       match_observation_numbers
                       ukirt_filename_is_archival/;
 use UKIRT::Archive::WrapDR qw/combine_pipeline_logs run_ukirt_pipeline/;
@@ -128,11 +129,13 @@ if (defined $reduced_dir) {
 else {
     # Retrieve raw data.
 
-    my %existing_files = scan_dir();
+    # Extend scan_dir's default pattern to include ORAC-DR log files.
+    my $scan_pattern = qr/(?:\.(?:sdf|fits|png)$)|(?:^log\.)/;
+    my %existing_files = scan_dir($scan_pattern);
 
     retrieve_data($id, $inputs, 0);
 
-    my %post_retrieve = scan_dir();
+    my %post_retrieve = scan_dir($scan_pattern);
 
     # Compare the old list with the new to fet a list of files that
     # should be processed.
@@ -202,7 +205,7 @@ else {
 
     # Get a list of the newly created files.
 
-    my %post_process = scan_dir();
+    my %post_process = scan_dir($scan_pattern);
 
     @drfiles = compare_file_lists(\%post_retrieve, \%post_process);
 }
@@ -216,6 +219,7 @@ my %drhdrs = read_headers(@drfiles);
 # Convert data products to FITS.
 
 convert_ukirt_products($id, \%drhdrs);
+convert_ukirt_logs(\@drfiles);
 
 exit(0) if $abort_after_cv;
 

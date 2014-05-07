@@ -26,6 +26,7 @@ use JSA::Starlink qw/prov_update_parent_path/;
 
 use parent qw/Exporter/;
 our @EXPORT_OK = qw/convert_ukirt_products
+                    convert_ukirt_logs
                     match_observation_numbers
                     ukirt_filename_is_raw
                     ukirt_filename_is_archival/;
@@ -77,6 +78,55 @@ sub convert_ukirt_products {
 
     # Combine thumbnail images.
     merge_ukirt_pngs(\%pngs);
+}
+
+=item convert_ukirt_logs
+
+Rename the log files which we want to keep so that they have suitable
+file names for storage in the archive.
+
+Takes a complete list of files found in the directory because the
+JSA::Headers::read_headers subroutine eliminates files (such as logs)
+without headers.  We also need to have a look a the product filename
+in order to determine the instrument and date to use in the new
+filenames.  (Assuming that UKIRT data is processed as a whole night,
+otherwise we will just have the last log for data reduced on a given night.)
+
+=cut
+
+sub convert_ukirt_logs {
+    my $files = shift;
+    my %inst = ();
+    my %date = ();
+    my @log = ();
+
+    # Look through the files and make a list of logs to process,
+    # and count the number of files for each instrument and date.
+    foreach my $file (@$files) {
+        if (ukirt_filename_is_log($file)) {
+            push @log, $file;
+        }
+        elsif (ukirt_file_is_product($file)) {
+            my ($inst, $date, undef, undef) = split_ukirt_filename($file);
+            next unless defined $inst and defined $date;
+            $inst{$inst} ++;
+            $date{$date} ++;
+        }
+    }
+
+    # Determine the instrument and date with which to label the logs.
+    # (The most common amongst the files specified.)
+    return unless %inst;
+    my $inst = [sort {$inst{$b} <=> $inst{$a}} keys %inst]->[0];
+    my $date = [sort {$date{$b} <=> $date{$a}} keys %date]->[0];
+
+    # Finally copy the logs we want to keep.
+    foreach my $file (@log) {
+        my $outfile = convert_ukirt_log_filename($inst, $date, $file);
+        next unless defined $outfile;
+
+        copy($file, $outfile);
+    }
 }
 
 =item convert_ukirt_filename
@@ -139,6 +189,28 @@ sub convert_ukirt_preview_filename {
     my $size = $1;
 
     return sprintf('UKIRT_%s_%s_%05d_%s_preview_%s.png', $inst, $date, $obs, $product, $size);
+}
+
+=item convert_ukirt_log_filename
+
+Converts filenames for log files.
+
+=cut
+
+sub convert_ukirt_log_filename {
+    my $inst = shift;
+    my $date = shift;
+    my $file = shift;
+
+    my $suffix = undef;
+
+    if ($file =~ /^log\.([a-z]+)$/) {
+        $suffix = 'log_' . $1;
+    }
+
+    return undef unless defined $suffix;
+
+    return sprintf('UKIRT_%s_%s_%s.txt', $inst, $date, $suffix);
 }
 
 =item convert_ukirt_sdfs
@@ -547,13 +619,36 @@ Analagous to C<JSA::Files::looks_like_cadcfile>.
     # List of filename patterns.  A file is considered archival
     # if it matches any of these patterns.
     my @ukirt_archival_patterns = (
-        qr/^UKIRT_.*\.(fits|png)$/,
+        qr/^UKIRT_.*\.(?:fits|png|txt)$/,
     );
 
     sub ukirt_filename_is_archival {
         my $filename = basename(shift);
 
         foreach my $pattern (@ukirt_archival_patterns) {
+            return 1 if $filename =~ $pattern;
+        }
+
+        return 0;
+    }
+}
+
+=item ukirt_filename_is_log
+
+Test whether the given filename is a log file which we would like
+to save in the archive.
+
+=cut
+
+{
+    my @ukirt_log_patterns = (
+        qr/^log\.group$/,
+    );
+
+    sub ukirt_filename_is_log {
+        my $filename = basename(shift);
+
+        foreach my $pattern (@ukirt_log_patterns) {
             return 1 if $filename =~ $pattern;
         }
 
