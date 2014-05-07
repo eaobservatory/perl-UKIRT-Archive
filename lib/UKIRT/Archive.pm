@@ -22,10 +22,12 @@ use JSA::Files qw/looks_like_drthumb/;
 use JSA::Headers qw/update_fits_product/;
 use JSA::Headers::Starlink qw/update_fits_headers add_fits_comments/;
 use JSA::Logging qw/log_warning/;
+use JSA::Starlink qw/prov_update_parent_path/;
 
 use parent qw/Exporter/;
 our @EXPORT_OK = qw/convert_ukirt_products
                     match_observation_numbers
+                    ukirt_filename_is_raw
                     ukirt_filename_is_archival/;
 
 our $VERSION = '0.001';
@@ -152,6 +154,7 @@ sub convert_ukirt_sdfs {
 
     my %new_name = ();
     my %new_name_count = ();
+    my %new_name_unique = ();
 
     # Go through the list of files, rejecting those for which
     # we cannot determine a new file name, and make a list of the
@@ -164,8 +167,8 @@ sub convert_ukirt_sdfs {
         $new_name_count{$outfile} ++;
     }
 
-    # Go through the files a second time to actually perform the
-    # conversion.
+    # Go through the files a second time to make sure each file has a
+    # unique new name.
     while (my ($file, $outfile) = each %new_name) {
         # Are we trying to produce more than one file with this
         # new file name?  If so, then re-generate the name, but
@@ -186,9 +189,49 @@ sub convert_ukirt_sdfs {
             }
         }
 
-        # TODO: update provenance?
-        # See JSA::Convert::convert_dr_files call to
-        # prov_update_parent_path for JSA example.
+        $new_name_unique{$file} = $outfile;
+    }
+
+    # Actually perform the conversion.  We now have all the filename mappings
+    # so we can update the provenance.
+    while (my ($file, $outfile) = each %new_name_unique) {
+        prov_update_parent_path(
+            $file,
+            sub {
+                # Supposedly test that the file is a valid product.  But we
+                # already checked all these files, so just return true.
+                return 1;
+            },
+            sub {
+                # Call-back to test whether a filename is suitable for the
+                # archive.  Can't just give a \&ukirt_filename_is_archival
+                # as we need to remove the directory name from the path.
+                my $file = basename(shift);
+                return ukirt_filename_is_archival($file);
+            },
+            sub {
+                # Call-back to check whether a provenance entry should
+                # be kept.  Yes if it's already an archival file, a raw
+                # file, or it's one we're currently converting to FITS.
+                my $file = basename(shift);
+                $file =~ s/\.I\d+//;
+                return ukirt_filename_is_archival($file)
+                    || ukirt_filename_is_raw($file)
+                    || exists $new_name_unique{$file};
+            },
+            sub {
+                # Call-back to convert provenance entry filenames to
+                # their archival form.  We can just use the hash of
+                # filename conversions.  This routine does not get
+                # called for archival files.
+                my $file = basename(shift);
+                $file =~ s/\.I\d+//;
+                return $file if ukirt_filename_is_raw($file);
+                return $new_name_unique{$file};
+            },
+            # Enable strict provenance checking.
+            1,
+        );
 
         # TODO: set WCS attributes?
         # See JSA::Convert::convert_dr_files call to
@@ -511,6 +554,33 @@ Analagous to C<JSA::Files::looks_like_cadcfile>.
         my $filename = basename(shift);
 
         foreach my $pattern (@ukirt_archival_patterns) {
+            return 1 if $filename =~ $pattern;
+        }
+
+        return 0;
+    }
+}
+
+=item ukirt_filename_is_raw
+
+Check whether the given filename follows the naming convention for
+raw UKIRT.
+
+Analagous to C<JSA::Files::looks_like_rawfile>.
+
+=cut
+
+{
+    # List of filename patterns.  A file is considered archival
+    # if it matches any of these patterns.
+    my @ukirt_raw_patterns = (
+        qr/^[a-z][0-9]{8}_[0-9]{5}\.(?:sdf|fits)$/,
+    );
+
+    sub ukirt_filename_is_raw {
+        my $filename = basename(shift);
+
+        foreach my $pattern (@ukirt_raw_patterns) {
             return 1 if $filename =~ $pattern;
         }
 
