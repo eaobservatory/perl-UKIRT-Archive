@@ -17,7 +17,7 @@ use Number::Interval;
 
 use Astro::FITS::CFITSIO qw/:constants/;
 use Astro::WaveBand;
-use JSA::Convert qw/ndf2fits/;
+use JSA::Convert qw/ndf2fits write_dpinfo_png/;
 use JSA::Files qw/looks_like_drthumb/;
 use JSA::Headers qw/update_fits_product/;
 use JSA::Headers::Starlink qw/update_fits_headers add_fits_comments/;
@@ -77,7 +77,7 @@ sub convert_ukirt_products {
     convert_ukirt_catalogs($dpid, $dpdate, \%catalogs);
 
     # Combine thumbnail images.
-    merge_ukirt_pngs(\%pngs);
+    merge_ukirt_pngs($dpid, $dpdate, \%pngs);
 }
 
 =item convert_ukirt_logs
@@ -439,6 +439,8 @@ my $composite = '/usr/bin/composite';
 my $have_composite = -e $composite;
 
 sub merge_ukirt_pngs {
+    my $dpid = shift;
+    my $dpdate = shift;
     my $files = shift;
     my %newfiles = ();
 
@@ -520,6 +522,8 @@ sub merge_ukirt_pngs {
                 copy($rimg[0], $new);
             }
         }
+
+        write_dpinfo_png($new, $dpdate, $dpid);
     }
 }
 
