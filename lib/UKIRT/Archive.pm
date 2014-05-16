@@ -148,13 +148,13 @@ sub convert_ukirt_filename {
     my $product = $header->value('PRODUCT');
     return undef unless (defined $product) && ($product =~ /^[-_A-Za-z0-9]+$/);
 
-    return sprintf('UKIRT_%s_%s_%05d_%s.fits', $inst, $date, $obs, $product)
-        unless $include_suffix;
+    return lc(sprintf('ukirt_%s_%s_%05d_%s.fits', $inst, $date, $obs,
+        $product)) unless $include_suffix;
 
     $suffix =~ s/_mos// unless $include_mos;
 
-    return sprintf('UKIRT_%s_%s_%05d_%s_%s.fits', $inst, $date, $obs, $product,
-        $suffix);
+    return lc(sprintf('ukirt_%s_%s_%05d_%s_%s.fits', $inst, $date, $obs,
+        $product, $suffix));
 }
 
 =item convert_ukirt_preview_filename
@@ -188,7 +188,8 @@ sub convert_ukirt_preview_filename {
     return undef unless $suffix =~ /(?:rimg|rsp)_(?:vector_)?(\d+)$/;
     my $size = $1;
 
-    return sprintf('UKIRT_%s_%s_%05d_%s_preview_%s.png', $inst, $date, $obs, $product, $size);
+    return lc(sprintf('ukirt_%s_%s_%05d_%s_preview_%s.png', $inst, $date,
+        $obs, $product, $size));
 }
 
 =item convert_ukirt_log_filename
@@ -210,7 +211,7 @@ sub convert_ukirt_log_filename {
 
     return undef unless defined $suffix;
 
-    return sprintf('UKIRT_%s_%s_%s.txt', $inst, $date, $suffix);
+    return lc(sprintf('ukirt_%s_%s_%s.txt', $inst, $date, $suffix));
 }
 
 =item convert_ukirt_sdfs
@@ -345,8 +346,8 @@ sub convert_ukirt_catalogs {
         my ($inst, $date, $obs, $suffix) = split_ukirt_filename($file);
         next unless defined $inst;
 
-        my $outfile = sprintf('UKIRT_%s_%s_%05d_%s_catalog.fits',
-                              $inst, $date, $obs, $product);
+        my $outfile = lc(sprintf('ukirt_%s_%s_%05d_%s_catalog.fits',
+                              $inst, $date, $obs, $product));
 
         copy($file, $outfile);
 
@@ -619,7 +620,7 @@ Analagous to C<JSA::Files::looks_like_cadcfile>.
     # List of filename patterns.  A file is considered archival
     # if it matches any of these patterns.
     my @ukirt_archival_patterns = (
-        qr/^UKIRT_.*\.(?:fits|png|txt)$/,
+        qr/^ukirt_.*\.(?:fits|png|txt)$/,
     );
 
     sub ukirt_filename_is_archival {
