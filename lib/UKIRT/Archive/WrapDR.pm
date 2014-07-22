@@ -1,6 +1,6 @@
 package UKIRT::Archive::WrapDR;
 
-=head1 Name
+=head1 NAME
 
 UKIRT::Archive::WrapDR - UKIRT archive data reduction wrapping subroutines
 
