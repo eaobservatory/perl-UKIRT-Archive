@@ -76,8 +76,8 @@ sub _fix_hdu_header {
         $n_fix ++ if $card =~ s/^(........=                )FALSE/$1    F/;
         $n_fix ++ if $card =~ s/^(........=                 )TRUE/$1   T/;
 
-        # Short non-terminated string with blank rest of line.
-        $n_fix ++ if $card =~ s/^(........= '[^']{8}) ( *)$/$1'$2/;
+        # Short-ish non-terminated string with blank rest of line.
+        $n_fix ++ if $card =~ s/^(........= '[^']{8}[^' ]{0,10}?) ( *)$/$1'$2/;
 
         # DATE headers with trailing Z.
         $n_fix ++ if $card =~ s/^DATE-(...= '....-..-..T..:..:..)Z'/DATE-$1' /;
