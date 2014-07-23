@@ -82,6 +82,10 @@ sub _fix_hdu_header {
         # DATE headers with trailing Z.
         $n_fix ++ if $card =~ s/^DATE-(...= '....-..-..T..:..:..)Z'/DATE-$1' /;
 
+        # OBJECT header with one unquoted '
+        $n_fix ++ if $card =~ s/^(OBJECT  = '[^']+)'([^']+' \/ [A-Za-z0-9 ]+) $/$1''$2/
+                  or $card =~ s/^(OBJECT  = '[^']+)'([^']+') ( +\/ [A-Za-z0-9 ]+)$/$1''$2$3/;
+
         push @card, $card;
     }
 
