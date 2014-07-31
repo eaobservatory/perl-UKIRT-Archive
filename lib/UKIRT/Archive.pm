@@ -23,6 +23,7 @@ use JSA::Headers qw/update_fits_product/;
 use JSA::Headers::Starlink qw/update_fits_headers add_fits_comments/;
 use JSA::Logging qw/log_warning/;
 use JSA::Starlink qw/prov_update_parent_path/;
+use UKIRT::Archive::HeaderFix qw/fix_fits_header/;
 
 use parent qw/Exporter/;
 our @EXPORT_OK = qw/convert_ukirt_products
@@ -325,6 +326,13 @@ sub convert_ukirt_sdfs {
 
         # Fix product names in extensions.
         update_fits_product($outfile);
+
+        # Check FITS headers.  For data in the archive in the original SDF
+        # file format, there may be invalid FITS headers inside the files.
+        # (Only actual FITS files are checked with fitsverify on entry
+        # to the archive.)  We need to fix up any header problems so
+        # that the FITS products are accepted into the archive.
+        fix_fits_header($outfile);
     }
 }
 
