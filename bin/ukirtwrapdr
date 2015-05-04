@@ -14,7 +14,6 @@ use File::Spec;
 use File::Temp qw/tempdir/;
 use Getopt::Long qw/GetOptionsFromString/;
 
-use JSA::Convert qw/convert_dr_files/;
 use JSA::Files qw/compare_file_lists scan_dir/;
 use JSA::Headers qw/get_orac_instrument read_headers/;
 use JSA::Logging qw/log_message log_warning/;
